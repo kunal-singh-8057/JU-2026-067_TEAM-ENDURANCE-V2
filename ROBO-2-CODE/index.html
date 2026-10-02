@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+    <title>AI Insect Detector</title>
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <style>
+
+        body {
+
+            margin: 0;
+
+            background: #111;
+
+            color: white;
+
+            font-family: Arial;
+
+            text-align: center;
+
+        }
+
+        h1 {
+
+            margin: 15px;
+
+        }
+
+        #cameraContainer {
+
+            position: relative;
+
+            width: 100%;
+
+            max-width: 900px;
+
+            margin: auto;
+
+        }
+
+        #video {
+
+            width: 100%;
+
+            display: block;
+
+        }
+
+        #canvas {
+
+            position: absolute;
+
+            top: 0;
+
+            left: 0;
+
+            width: 100%;
+
+            height: 100%;
+
+            pointer-events: none;
+
+        }
+
+        button {
+
+            margin: 15px;
+
+            padding: 12px 25px;
+
+            font-size: 18px;
+
+            cursor: pointer;
+
+        }
+
+        #status {
+
+            margin: 10px;
+
+            font-size: 18px;
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<h1>🐛 AI Insect Detector</h1>
+
+
+<div id="cameraContainer">
+
+    <video
+        id="video"
+        autoplay
+        playsinline>
+    </video>
+
+    <canvas id="canvas"></canvas>
+
+</div>
+
+
+<button onclick="startCamera()">
+
+    Start Camera
+
+</button>
+
+
+<button onclick="stopCamera()">
+
+    Stop Camera
+
+</button>
+
+
+<div id="status">
+
+    Camera not started
+
+</div>
+
+
+<script>
+
+
+const video =
+    document.getElementById("video");
+
+
+const canvas =
+    document.getElementById("canvas");
+
+
+const ctx =
+    canvas.getContext("2d");
+
+
+const status =
+    document.getElementById("status");
+
+
+let stream = null;
+
+let running = false;
+
+let processing = false;
+
+
+// --------------------------------
+// Start camera
+// --------------------------------
+
+async function startCamera() {
+
+    try {
+
+        stream =
+            await navigator.mediaDevices.getUserMedia({
+
+                video: {
+                    facingMode: "environment"
+                },
+
+                audio: false
+
+            });
+
+
+        video.srcObject = stream;
+
+        running = true;
+
+        status.innerText =
+            "🟢 Camera running";
+
+
+        video.onloadedmetadata = function() {
+
+            canvas.width =
+                video.videoWidth;
+
+            canvas.height =
+                video.videoHeight;
+
+            processFrame();
+
+        };
+
+
+    }
+
+    catch (error) {
+
+        console.error(error);
+
+        status.innerText =
+            "❌ Camera access denied";
+
+        alert(
+            "Please allow camera access."
+        );
+
+    }
+
+}
+
+
+// --------------------------------
+// Stop camera
+// --------------------------------
+
+function stopCamera() {
+
+    running = false;
+
+    if (stream) {
+
+        stream
+            .getTracks()
+            .forEach(
+                track => track.stop()
+            );
+
+        stream = null;
+
+    }
+
+    status.innerText =
+        "🔴 Camera stopped";
+
+}
+
+
+// --------------------------------
+// Process camera frames
+// --------------------------------
+
+async function processFrame() {
+
+    if (!running) {
+
+        return;
+
+    }
+
+
+    if (
+        !processing &&
+        video.readyState >= 2
+    ) {
+
+        processing = true;
+
+
+        // Create temporary canvas
+        const tempCanvas =
+            document.createElement("canvas");
+
+
+        tempCanvas.width =
+            video.videoWidth;
+
+        tempCanvas.height =
+            video.videoHeight;
+
+
+        const tempCtx =
+            tempCanvas.getContext("2d");
+
+
+        // Copy current camera frame
+        tempCtx.drawImage(
+            video,
+            0,
+            0,
+            tempCanvas.width,
+            tempCanvas.height
+        );
+
+
+        // Convert frame to JPEG
+        tempCanvas.toBlob(
+
+            async function(blob) {
+
+                try {
+
+                    const formData =
+                        new FormData();
+
+
+                    formData.append(
+                        "image",
+                        blob,
+                        "frame.jpg"
+                    );
+
+
+                    const response =
+                        await fetch(
+                            "/detect",
+                            {
+                                method: "POST",
+                                body: formData
+                            }
+                        );
+
+
+                    const data =
+                        await response.json();
+
+
+                    drawDetections(
+                        data.detections || []
+                    );
+
+
+                }
+
+                catch (error) {
+
+                    console.error(error);
+
+                }
+
+                finally {
+
+                    processing = false;
+
+                }
+
+            },
+
+            "image/jpeg",
+
+            0.7
+
+        );
+
+    }
+
+
+    // Process again after 100 ms
+    setTimeout(
+        processFrame,
+        100
+    );
+
+}
+
+
+// --------------------------------
+// Draw YOLO boxes
+// --------------------------------
+
+function drawDetections(
+    detections
+) {
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+
+    if (detections.length === 0) {
+
+        status.innerText =
+            "🟢 Camera running - No insect detected";
+
+        return;
+
+    }
+
+
+    status.innerText =
+        "🐛 Insect detected";
+
+
+    // Scaling because displayed video
+    // may have a different size
+    const scaleX =
+        canvas.width /
+        video.videoWidth;
+
+
+    const scaleY =
+        canvas.height /
+        video.videoHeight;
+
+
+    detections.forEach(
+        function(item) {
+
+
+            const x =
+                item.x1 * scaleX;
+
+
+            const y =
+                item.y1 * scaleY;
+
+
+            const width =
+                (item.x2 - item.x1) *
+                scaleX;
+
+
+            const height =
+                (item.y2 - item.y1) *
+                scaleY;
+
+
+            // Bounding box
+
+            ctx.strokeStyle =
+                "#00ff00";
+
+            ctx.lineWidth = 3;
+
+            ctx.strokeRect(
+                x,
+                y,
+                width,
+                height
+            );
+
+
+            // Label background
+
+            const label =
+                item.name +
+                " " +
+                item.confidence +
+                "%";
+
+
+            ctx.font =
+                "18px Arial";
+
+
+            const textWidth =
+                ctx.measureText(label).width;
+
+
+            ctx.fillStyle =
+                "#00ff00";
+
+
+            ctx.fillRect(
+                x,
+                y - 25,
+                textWidth + 10,
+                25
+            );
+
+
+            // Label text
+
+            ctx.fillStyle =
+                "#000000";
+
+
+            ctx.fillText(
+                label,
+                x + 5,
+                y - 7
+            );
+
+
+        }
+
+    );
+
+}
+
+
+</script>
+
+
+</body>
+
+</html>
